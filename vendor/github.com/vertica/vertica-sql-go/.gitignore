@@ -1,5 +1,0 @@
-pkg
-bin
-src/golang.org
-src/github.com
-*.code-workspace
