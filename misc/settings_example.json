@@ -1,0 +1,63 @@
+{
+  "queries": [
+    {
+      "query": [
+        "SELECT /*+ label(sessions_by_query_type) */ query_type, COUNT(*) - 1 AS query_avg_count FROM (  SELECT UPPER(regexp_substr(current_statement::char(8),'^[^\\s]+')::CHAR(8 )) AS query_type FROM sessions UNION ALL SELECT 'INSERT' UNION ALL SELECT 'MERGE' UNION ALL SELECT 'SELECT' UNION ALL SELECT 'DELETE' UNION ALL SELECT 'COPY' UNION ALL SELECT 'ALTER' UNION ALL SELECT 'TRUNCATE' UNION ALL SELECT 'CREATE' ) interval_query WHERE query_type NOT IN ('COMMIT','SET') AND regexp_like(query_type,'^[A-Z]+$') GROUP BY query_type;"
+      ],
+      "value_field_name": "query_avg_count",
+      "name": "sessions_by_query_type"
+    },
+    {
+      "query": [
+        "SELECT  /*+ label(sessions_by_query_type_dc_requests_issued) */ query_type, COUNT(*) - 1 AS query_avg_count FROM (  SELECT UPPER(regexp_substr(request::char(8),'^[^\\s]+')::CHAR(8)) AS query_type FROM v_internal.dc_requests_issued WHERE TIME > getUTCdate() - INTERVAL '1m' AND request_type NOT IN ('SET','TRANSACTION') UNION ALL SELECT 'INSERT' UNION ALL SELECT 'MERGE' UNION ALL SELECT 'SELECT' UNION ALL SELECT 'DELETE' UNION ALL SELECT 'COPY' UNION ALL SELECT 'ALTER' UNION ALL SELECT 'TRUNCATE' UNION ALL SELECT 'CREATE' ) interval_query GROUP BY query_type;"
+      ],
+      "value_field_name": "query_avg_count",
+      "name": "sessions_by_query_type_dc_requests_issued"
+    },
+    {
+      "query": [
+        "SELECT  /*+ label(locks) */ CASE WHEN lock_mode='I' THEN 'INSERT' WHEN lock_mode='S' THEN 'SHARED'",
+        " WHEN lock_mode='SI' THEN 'SHARED_INSERT' WHEN lock_mode='X' THEN 'EXCLUSIVE' WHEN lock_mode='T'",
+        " THEN 'TUPLE' WHEN lock_mode='U' THEN 'USAGE' WHEN lock_mode='O' THEN 'OWNER' ELSE 'UNKNOWN' END",
+        "AS v_lock_mode,count(*) as lock_count FROM locks group by lock_mode;"
+      ],
+      "value_field_name": "lock_count",
+      "name": "locks"
+    },
+    {
+      "query": "SELECT\n    schemaname, anchortablename, MAX(COUNT) row_count\nFROM\n    (    SELECT\n            schemaname, anchortablename, serializedsegexpr, SUM(COUNT) AS COUNT\n        FROM\n            (    SELECT\n                    schemaname, anchortablename, serializedsegexpr, segment_lower_bound, segment_upper_bound, min(COUNT) AS COUNT\n                FROM\n                    (    SELECT\n                            schemaname, anchortablename, projection_name, serializedsegexpr, CASE WHEN segment_lower_bound IS NULL THEN node_name ELSE '' END AS node_name, segment_lower_bound, segment_upper_bound, SUM(total_row_count) AS COUNT\n                        FROM\n                            storage_containers s\n                            JOIN vs_projections p\n                            ON s.projection_id = p.oid\n                            LEFT JOIN vs_segments seg\n                            ON p.seginfo = seg.oid\n                        WHERE\n                            (sitename = ''\n                            OR sitename = node_name)\n                        GROUP BY\n                            1, 2, 3, 4, 5, 6, 7 ) tmp\n                GROUP BY\n                    1, 2, 3, 4, 5 ) tmp\n        GROUP BY\n            1, 2, 3 ) tmp\nGROUP BY\n    1, 2",
+      "value_field_name": "row_count",
+      "name": "table_row_counts"
+    },
+    {
+      "query": "select /*+ label(node_ros_count) */ node_name, count(*) as sum_ros_count from storage_containers group by 1 order by 1",
+
+      "value_field_name": "sum_ros_count",
+      "name": "node_ros_count"
+    },
+    {
+      "query": "select  /*+ label(catalog_size_mb) */   a.node_name as node_name,  floor((((sum((a.total_memory - a.free_memory)) / 1024::numeric(18,0)) / 1024::numeric(18,0)) )) AS catalog_size_mb FROM (v_internal.dc_allocation_pool_statistics a JOIN (SELECT dc_allocation_pool_statistics.node_name, date_trunc('SECOND'::varchar(6), max(dc_allocation_pool_statistics.time)) AS time FROM v_internal.dc_allocation_pool_statistics GROUP BY dc_allocation_pool_statistics.node_name) b ON (((a.node_name = b.node_name) AND (date_trunc('SECOND'::varchar(6), a.time) = b.time)))) GROUP BY a.node_name, b.time ORDER BY floor((((sum((a.total_memory - a.free_memory)) / 1024::numeric(18,0)) / 1024::numeric(18,0)) )) DESC",
+
+      "value_field_name": "catalog_size_mb",
+      "name": "catalog_size_mb"
+    },
+    {
+      "query": "SELECT  /*+ label(session_cnt) */ count(*) as session_count from v_monitor.sessions",
+
+      "value_field_name": "session_count",
+      "name": "session_cnt"
+    },
+    {
+      "query": "SELECT  /*+ label(cpu_usage) */ node_name, average_cpu_usage_percent FROM cpu_usage WHERE start_time >= TIMESTAMP_ROUND(CLOCK_TIMESTAMP() - INTERVAL '2m', 'MI') AND end_time <= TIMESTAMP_ROUND(CLOCK_TIMESTAMP() - INTERVAL '1m','MI')",
+
+      "value_field_name": "average_cpu_usage_percent",
+      "name": "cpu_usage"
+    },
+    {
+      "query": "select  /*+ label(database_size_gb) */ audit_start_timestamp, database_size_bytes / ( 1024^3 ) AS database_size_gb, license_size_bytes / ( 1024^3 )  AS license_size_gb,  usage_percent * 100 as usage_percent FROM   v_catalog.license_audits where used_sampling=true ORDER  BY audit_start_timestamp DESC limit 1",
+
+      "value_field_name": "database_size_gb",
+      "name": "database_size_gb"
+    }
+  ]
+}
