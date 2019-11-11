@@ -1,0 +1,41 @@
+#! /bin/sh
+
+set -e
+
+addzuser() {
+    if ! getent group vertica_exporter >/dev/null; then
+        addgroup --system vertica_exporter >/dev/null
+    fi
+
+    if ! getent passwd vertica_exporter >/dev/null; then
+        adduser \
+          --system \
+          --disabled-login \
+          --ingroup vertica_exporter \
+          --home /nonexistent \
+          --gecos "vertica_exporter user" \
+          --shell /usr/sbin/nologin \
+          vertica_exporter  >/dev/null
+    fi
+}
+
+case "$1" in
+    install)
+        addzuser
+        ;;
+    upgrade)
+        addzuser
+        ;;
+
+    abort-upgrade)
+        ;;
+
+    *)
+        echo "preinst called with unknown argument \`$1'" >&2
+        exit 0
+        ;;
+esac
+
+#DEBHELPER#
+
+exit 0

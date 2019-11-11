@@ -1,0 +1,15 @@
+[Unit]
+Description=Prometheus vertica exporter
+After=network.target
+
+[Service]
+Type=simple
+EnvironmentFile=-/etc/default/vertica_exporter
+ExecStart=/usr/bin/vertica_exporter
+Restart=on-failure
+SyslogIdentifier=vertica_exporter
+User=vertica_exporter
+Group=vertica_exporter
+
+[Install]
+WantedBy=multi-user.target
