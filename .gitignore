@@ -1,3 +1,4 @@
 vendor
 .idea
 vertica_exporter
+settings.json
