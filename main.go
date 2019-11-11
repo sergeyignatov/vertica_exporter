@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"fmt"
-
 	"github.com/jmoiron/sqlx"
 	"github.com/labstack/echo"
 	log "github.com/labstack/gommon/log"
@@ -13,8 +12,10 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	_ "github.com/vertica/vertica-sql-go"
 	"net/http"
-
 	"time"
+	"os"
+	"strings"
+	"encoding/json"
 )
 
 type Server struct {
@@ -23,33 +24,36 @@ type Server struct {
 	lastPingTime                time.Time
 	lastPingError               error
 	db                          *sqlx.DB
+	settings Settings
 }
 type Query struct {
-	q          string
-	name       string
-	labels     []string
-	valueField string
+	Query           interface{} `json:"query"`
+	Name       string `json:"name"`
+	Labels     []string
+	ValueField string `json:"value_field_name"`
 }
+func (q Query) String() (s string) {
 
+	switch t := q.Query.(type) {
+		case []interface{}:
+			tmp := make([]string, len(t))
+			for i, ss := range t {
+				tmp[i] = ss.(string)
+			}
+			s = strings.Join(tmp, " ")
+	case string:
+		s = t
+	}
+	return
+}
+type Settings struct {
+	DBHost string `json:"dbhost"`
+	DBUser string `json:"dbuser"`
+	DBPass string `json:"dbpass"`
+	Queries []Query
+}
 var (
 	namespace = "vertica"
-	queries   = []Query{
-		{
-			q: `SELECT /*+ label(sessions_by_query_type) */ query_type, COUNT(*) - 1 AS query_avg_count 
-				FROM (  SELECT UPPER(regexp_substr(current_statement::char(8),'^[^\\s]+')::CHAR(8 )) AS query_type FROM sessions UNION ALL 
-						SELECT 'INSERT' UNION ALL SELECT 'MERGE' UNION ALL SELECT 'SELECT' UNION ALL SELECT 'DELETE' UNION ALL SELECT 'COPY' UNION ALL SELECT 'ALTER' UNION ALL SELECT 'TRUNCATE' UNION ALL SELECT 'CREATE' ) interval_query WHERE query_type NOT IN ('COMMIT','SET') AND regexp_like(query_type,'^[A-Z]+$') GROUP BY query_type`,
-			labels:     []string{"query_type"},
-			valueField: "query_avg_count",
-			name:       "sessions_by_query_type",
-		},
-		{
-
-			q:          `select  /*+ label(catalog_size_mb) */   a.node_name as node_name,  floor((((sum((a.total_memory - a.free_memory)) / 1024::numeric(18,0)) / 1024::numeric(18,0)) )) AS catalog_size_mb FROM (v_internal.dc_allocation_pool_statistics a JOIN (SELECT dc_allocation_pool_statistics.node_name, date_trunc('SECOND'::varchar(6), max(dc_allocation_pool_statistics.time)) AS time FROM v_internal.dc_allocation_pool_statistics GROUP BY dc_allocation_pool_statistics.node_name) b ON (((a.node_name = b.node_name) AND (date_trunc('SECOND'::varchar(6), a.time) = b.time)))) GROUP BY a.node_name, b.time ORDER BY floor((((sum((a.total_memory - a.free_memory)) / 1024::numeric(18,0)) / 1024::numeric(18,0)) )) DESC`,
-			labels:     []string{"node_name"},
-			valueField: "catalog_size_mb",
-			name:       "catalog_size_mb",
-		},
-	}
 )
 
 func customHTTPErrorHandler(err error, c echo.Context) {
@@ -68,7 +72,7 @@ func (s *Server) Collect(ch chan<- prometheus.Metric) {
 }
 
 func (s *Server) dbGET(q string) (t []map[string]interface{}, err error) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	rows, err := s.db.QueryxContext(ctx, q)
 
@@ -100,25 +104,38 @@ func (s *Server) convertValue(i interface{}) (v float64, err error) {
 	return
 }
 func (s *Server) collect(ch chan<- prometheus.Metric) (err error) {
-	log.Info("collect")
+
 	var val float64
-	for _, q := range queries {
-		rows, err := s.dbGET(q.q)
+	for _, q := range s.settings.Queries {
+		rows, err := s.dbGET(q.String())
 		if err != nil {
 			return err
 		}
+		if len(rows) == 0 {
+			continue
+		}
 
+		labels := make([]string, 0)
+		for k := range rows[0] {
+			if strings.ToLower(k) != q.ValueField {
+				labels = append(labels, k)
+			}
+		}
+		if len(labels) == 0 && len(rows[0]) > 1 {
+			log.Error("labels is empty, ", q.ValueField)
+			continue
+		}
 		for _, r := range rows {
-			values := make([]string, len(q.labels))
-			for i, k := range q.labels {
+			values := make([]string, len(labels))
+			for i, k := range labels {
 				values[i] = fmt.Sprintf("%v", r[k])
 			}
 			newMetric := prometheus.NewGaugeVec(prometheus.GaugeOpts{
 				Namespace: namespace,
-				Name:      q.name,
-				Help:      q.name,
-			}, q.labels).WithLabelValues(values...)
-			if val, err = s.convertValue(r[q.valueField]); err != nil {
+				Name:      q.Name,
+				Help:      q.Name,
+			}, labels).WithLabelValues(values...)
+			if val, err = s.convertValue(r[q.ValueField]); err != nil {
 				return err
 			}
 
@@ -163,7 +180,19 @@ func (s *Server) initDB() {
 func (s *Server) Start() (err error) {
 	e := echo.New()
 	e.HTTPErrorHandler = customHTTPErrorHandler
-	prometheus.MustRegister(s)
+	done := make(chan error)
+	go func() {
+		done <- prometheus.Register(s)
+	}()
+	select {
+		case err := <-done:
+				if err != nil {
+					return err
+				}
+		case <- time.After(10* time.Second):
+				return fmt.Errorf("inialize timeout, check vertica user permissions")
+	}
+
 	e.GET("/metrics", echo.WrapHandler(promhttp.Handler()))
 	e.GET("/ping", func(c echo.Context) (err error) {
 
@@ -194,15 +223,28 @@ func run() (err error) {
 	dbLogin := flag.String("vertica_login", "dbadmin", "vertica username")
 	dbPassword := flag.String("vertica_password", "dbadmin", "vertica password")
 	dbHost := flag.String("vertica_host", "127.0.0.1:5433", "vertica host")
+	settingsFile := flag.String("settings", "./settings.json", "files with settings")
 	flag.Parse()
+	settings := Settings{}
+	if fd, err := os.Open(*settingsFile);err == nil {
+		dec := json.NewDecoder(fd)
+		if err = dec.Decode(&settings);err != nil {
+			return err
+		}
+	}else {
+		log.Error(err)
+	}
 
 	s := Server{
 		Listen:     *listen,
 		DBLogin:    *dbLogin,
 		DBPassword: *dbPassword,
 		DBHost:     *dbHost,
+		settings: settings,
 	}
+
 	s.initDB()
+
 	defer s.shutdown()
 	return s.Start()
 }
