@@ -180,6 +180,9 @@ func (s *Server) initDB() {
 func (s *Server) Start() (err error) {
 	e := echo.New()
 	e.HTTPErrorHandler = customHTTPErrorHandler
+	e.HideBanner = true
+	e.HidePort = true
+	e.Debug = false
 	done := make(chan error)
 	go func() {
 		done <- prometheus.Register(s)
