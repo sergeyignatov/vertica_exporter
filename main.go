@@ -207,9 +207,7 @@ func (s *Server) Start() (err error) {
 		}
 
 		defer func() {
-			if err != nil {
-				s.lastPingError = err
-			}
+			s.lastPingError = err
 			s.lastPingTime = time.Now()
 		}()
 
