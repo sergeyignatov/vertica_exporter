@@ -3,6 +3,7 @@ module github.com/sergeyignatov/vertica_exporter
 go 1.14
 
 require (
+	github.com/ahmetb/govvv v0.3.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/golang/protobuf v1.3.2 // indirect
 	github.com/jmoiron/sqlx v1.2.0

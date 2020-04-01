@@ -2,13 +2,13 @@ NAME:=vertica_exporter
 COMMIT := $(shell git log -1 --format=%ct)
 DESCRIPTION:="Prometheus vertica exporter"
 MAINTAINER:="Sergey Ignatov <sergey.a.ignatov@gmail.com>"
-VERSION ?= 0
+VERSION ?= $(shell cat VERSION)
 
 
 
 all: bin/$(NAME)
 bin/$(NAME): deps
-	go build -ldflags "-X main.revision=$(VERSION)" -o bin/$(NAME)
+	CGO_ENABLED=0 go build -ldflags="`govvv -flags`" -o bin/$(NAME)
 
 
 
@@ -36,8 +36,11 @@ deb: bin/$(NAME)
 gomodcheck:
 	@go help mod > /dev/null || (@echo micromdm requires Go version 1.11 or higher && exit 1)
 
-deps: gomodcheck
+deps: gomodcheck govvv
 	@go mod download
+
+govvv:
+	@go get github.com/ahmetb/govvv
 
 lint: bin/golangci-lint
 	./bin/golangci-lint run ./...

@@ -20,6 +20,10 @@ import (
 	"time"
 )
 
+var (
+	Version string
+)
+
 type Server struct {
 	Listen                      string
 	DBLogin, DBPassword, DBHost string
@@ -278,8 +282,14 @@ func run() (err error) {
 	pingPeriodPtr := flag.String("ping-period", "10s", "database ping period")
 	timeoutPtr := flag.String("timeout", "5s", "database timeout")
 	settingsFile := flag.String("settings", "./settings.json", "files with settings")
-
+	printVersion := flag.Bool("v", false, "print version and exit")
 	flag.Parse()
+
+	if *printVersion {
+		fmt.Println(Version)
+		return
+	}
+
 	vlogger.SetLogLevel(vlogger.NONE)
 	settings := Settings{}
 	if fd, err := os.Open(*settingsFile); err == nil {
