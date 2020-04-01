@@ -33,10 +33,15 @@ deb: bin/$(NAME)
 			bin/$(NAME)=/usr/bin/$(NAME)
 
 
-dep:
-ifeq ($(shell command -v dep 2> /dev/null),)
-	go get -u -v github.com/golang/dep/cmd/dep
-endif
+gomodcheck:
+	@go help mod > /dev/null || (@echo micromdm requires Go version 1.11 or higher && exit 1)
 
-deps: dep
-	dep ensure -v
+deps: gomodcheck
+	@go mod download
+
+lint: bin/golangci-lint
+	./bin/golangci-lint run ./...
+
+bin/golangci-lint:
+	@echo "Installing golangci-lint"
+	@curl -sfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh| sh
