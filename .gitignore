@@ -3,3 +3,4 @@ vendor
 vertica_exporter
 settings.json
 *.deb
+bin
